@@ -2,6 +2,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import EmotionWheel from '$lib/components/EmotionWheel.svelte';
   
   interface EmotionData {
     name: string;
@@ -12,28 +13,20 @@
     [key: string]: EmotionData;
   }
   
-  // Plutchik's 8 basic emotions
-  const emotions = [
+  // Plutchik's emotions
+  const allEmotions = [
     'joy', 'trust', 'fear', 'surprise',
-    'sadness', 'disgust', 'anger', 'anticipation'
-  ];
-  
-  // Secondary emotions (dyads)
-  const secondaryEmotions = [
+    'sadness', 'disgust', 'anger', 'anticipation',
     'optimism', 'love', 'submission', 'awe',
-    'disapproval', 'remorse', 'contempt', 'aggressiveness'
-  ];
-  
-  // Tertiary emotions
-  const tertiaryEmotions = [
+    'disapproval', 'remorse', 'contempt', 'aggressiveness',
     'serenity', 'acceptance', 'apprehension', 'distraction',
     'pensiveness', 'boredom', 'annoyance', 'interest'
   ];
   
-  const allEmotions = [...emotions, ...secondaryEmotions, ...tertiaryEmotions];
-  
   let emotionCounts: EmotionMap = {};
   let selectedEmotion: string | null = null;
+  let emotionNotes: { [key: string]: Array<{ note: string; timestamp: string }> } = {};
+  let componentKey = 0; // Force component re-render
   
   onMount(() => {
     loadEmotionCounts();
@@ -46,72 +39,38 @@
       emotionCounts = JSON.parse(stored);
     } else {
       // Initialize all emotions with count 0
+      const newCounts: EmotionMap = {};
       allEmotions.forEach(emotion => {
-        emotionCounts[emotion] = { name: emotion, count: 0 };
+        newCounts[emotion] = { name: emotion, count: 0 };
       });
+      emotionCounts = newCounts;
     }
+    
+    // Load notes
+    const notesStored = localStorage.getItem('emotionNotes');
+    if (notesStored) {
+      const allNotes = JSON.parse(notesStored);
+      // Group notes by emotion
+      const grouped: { [key: string]: Array<{ note: string; timestamp: string }> } = {};
+      allNotes.forEach((entry: any) => {
+        if (!grouped[entry.emotion]) {
+          grouped[entry.emotion] = [];
+        }
+        grouped[entry.emotion].push({ note: entry.note, timestamp: entry.timestamp });
+      });
+      emotionNotes = grouped;
+    }
+    
+    console.log('Main page - emotionCounts:', emotionCounts);
+    
+    // Force reactivity by creating new object references
+    emotionCounts = { ...emotionCounts };
+    emotionNotes = { ...emotionNotes };
+    componentKey++; // Increment to force re-render
   }
   
-  function getEmotionColor(emotion: string): string {
-  const count = emotionCounts[emotion]?.count || 0;
-  const isSelected = selectedEmotion === emotion;
-
-  const colorMap: { [key: string]: string } = {
-    'joy': '#FFD700',
-    'serenity': '#FFF8DC',
-    'trust': '#90EE90',
-    'acceptance': '#E0F0E0',
-    'fear': '#32CD32',
-    'apprehension': '#B0F0B0',
-    'surprise': '#87CEEB',
-    'distraction': '#D0E8F0',
-    'sadness': '#4169E1',
-    'pensiveness': '#A0C0E0',
-    'disgust': '#9370DB',
-    'boredom': '#D0C0E0',
-    'anger': '#FF6347',
-    'annoyance': '#FFB0A0',
-    'anticipation': '#FFA500',
-    'interest': '#FFD8A0',
-    'optimism': '#FFEC8B',
-    'love': '#FFB6C1',
-    'submission': '#98FB98',
-    'awe': '#7FFFD4',
-    'disapproval': '#8A7FB5',
-    'remorse': '#6495ED',
-    'contempt': '#BC8F8F',
-    'aggressiveness': '#FF8C69'
-  };
-
-  const baseColor = colorMap[emotion] || '#ffffff';
-
-  // Convert hex to RGB
-  const r = parseInt(baseColor.slice(1, 3), 16);
-  const g = parseInt(baseColor.slice(3, 5), 16);
-  const b = parseInt(baseColor.slice(5, 7), 16);
-
-  // Progress = 0 → white, 1 → full color
-  const progress = Math.min(count / 10, 1);
-
-  // Apply selection boost
-  const boost = isSelected ? 0.2 : 0;
-
-  const p = Math.min(progress + boost, 1);
-
-  // Blend white → color
-  const rr = Math.round(255 + (r - 255) * p);
-  const gg = Math.round(255 + (g - 255) * p);
-  const bb = Math.round(255 + (b - 255) * p);
-
-  return `rgb(${rr}, ${gg}, ${bb})`;
-}
-  
-  function getStrokeWidth(emotion: string): number {
-    return selectedEmotion === emotion ? 3 : 1.5;
-  }
-  
-  function selectEmotion(emotion: string) {
-    selectedEmotion = emotion;
+  function handleEmotionSelect(event: CustomEvent<string>) {
+    selectedEmotion = event.detail;
   }
   
   function handleSubmit() {
@@ -128,14 +87,29 @@
     const handleVisibilityChange = () => {
       if (!document.hidden) {
         loadEmotionCounts();
-        selectedEmotion = null; // Clear selection when returning
+        selectedEmotion = null;
       }
     };
     
+    // Also reload on focus and when navigating back
+    const handleFocus = () => {
+      loadEmotionCounts();
+    };
+    
+    // Listen for popstate (browser back button)
+    const handlePopState = () => {
+      loadEmotionCounts();
+      selectedEmotion = null;
+    };
+    
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('popstate', handlePopState);
     
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('popstate', handlePopState);
     };
   });
 </script>
@@ -144,114 +118,14 @@
   <div class="container">
     <h1>What emotion are you feeling right now?</h1>
     
-    <div class="wheel-container">
-      <svg viewBox="0 0 400 400" class="emotion-wheel">
-        <!-- Center circle -->
-        <circle cx="200" cy="200" r="180" fill="#F4A460" opacity="0.3"/>
-        
-        <!-- Core emotions (8 petals) -->
-        {#each emotions as emotion, i}
-          {@const angle = (i * 45) - 90}
-          {@const x = 200 + 100 * Math.cos(angle * Math.PI / 180)}
-          {@const y = 200 + 100 * Math.sin(angle * Math.PI / 180)}
-          
-          <ellipse
-            cx={x}
-            cy={y}
-            rx="45"
-            ry="65"
-            fill={getEmotionColor(emotion)}
-            stroke={selectedEmotion === emotion ? '#FF6B00' : '#333'}
-            stroke-width={getStrokeWidth(emotion)}
-            transform="rotate({angle} {x} {y})"
-            class="emotion-petal"
-            class:selected={selectedEmotion === emotion}
-            on:click={() => selectEmotion(emotion)}
-            on:keydown={(e) => e.key === 'Enter' && selectEmotion(emotion)}
-            role="button"
-            tabindex="0"
-          />
-          <text
-            x={x}
-            y={y + 5}
-            text-anchor="middle"
-            class="emotion-label"
-            class:selected={selectedEmotion === emotion}
-            on:click={() => selectEmotion(emotion)}
-          >
-            {emotion}
-          </text>
-        {/each}
-        
-        <!-- Secondary emotions (between petals) -->
-        {#each secondaryEmotions as emotion, i}
-          {@const angle = (i * 45 + 22.5) - 90}
-          {@const x = 200 + 145 * Math.cos(angle * Math.PI / 180)}
-          {@const y = 200 + 145 * Math.sin(angle * Math.PI / 180)}
-          
-          <ellipse
-            cx={x}
-            cy={y}
-            rx="30"
-            ry="45"
-            fill={getEmotionColor(emotion)}
-            stroke={selectedEmotion === emotion ? '#FF6B00' : '#333'}
-            stroke-width={selectedEmotion === emotion ? 2 : 1}
-            transform="rotate({angle} {x} {y})"
-            class="emotion-petal secondary"
-            class:selected={selectedEmotion === emotion}
-            on:click={() => selectEmotion(emotion)}
-            on:keydown={(e) => e.key === 'Enter' && selectEmotion(emotion)}
-            role="button"
-            tabindex="0"
-          />
-          <text
-            x={x}
-            y={y + 3}
-            text-anchor="middle"
-            class="emotion-label small"
-            class:selected={selectedEmotion === emotion}
-            on:click={() => selectEmotion(emotion)}
-          >
-            {emotion}
-          </text>
-        {/each}
-        
-        <!-- Tertiary emotions (milder versions) -->
-        {#each tertiaryEmotions as emotion, i}
-          {@const angle = (i * 45) - 90}
-          {@const x = 200 + 60 * Math.cos(angle * Math.PI / 180)}
-          {@const y = 200 + 60 * Math.sin(angle * Math.PI / 180)}
-          
-          <ellipse
-            cx={x}
-            cy={y}
-            rx="25"
-            ry="35"
-            fill={getEmotionColor(emotion)}
-            stroke={selectedEmotion === emotion ? '#FF6B00' : '#333'}
-            stroke-width={selectedEmotion === emotion ? 1.5 : 1}
-            transform="rotate({angle} {x} {y})"
-            class="emotion-petal tertiary"
-            class:selected={selectedEmotion === emotion}
-            on:click={() => selectEmotion(emotion)}
-            on:keydown={(e) => e.key === 'Enter' && selectEmotion(emotion)}
-            role="button"
-            tabindex="0"
-          />
-          <text
-            x={x}
-            y={y + 2}
-            text-anchor="middle"
-            class="emotion-label tiny"
-            class:selected={selectedEmotion === emotion}
-            on:click={() => selectEmotion(emotion)}
-          >
-            {emotion}
-          </text>
-        {/each}
-      </svg>
-    </div>
+    {#key componentKey}
+      <EmotionWheel 
+        {emotionCounts}
+        {selectedEmotion}
+        {emotionNotes}
+        on:select={handleEmotionSelect}
+      />
+    {/key}
     
     {#if selectedEmotion}
       <div class="selection-indicator">
@@ -291,53 +165,6 @@
     font-size: 1.5rem;
     margin-bottom: 2rem;
     font-weight: 400;
-  }
-  
-  .wheel-container {
-    background: white;
-    border-radius: 50%;
-    padding: 1rem;
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-  }
-  
-  .emotion-wheel {
-    width: 100%;
-    height: auto;
-  }
-  
-  .emotion-petal {
-    cursor: pointer;
-    transition: all 0.3s ease;
-  }
-  
-  .emotion-petal:hover {
-    filter: brightness(1.1);
-  }
-  
-  .emotion-petal.selected {
-    filter: brightness(1.15);
-  }
-  
-  .emotion-label {
-    font-size: 11px;
-    font-weight: 500;
-    pointer-events: none;
-    user-select: none;
-    fill: #333;
-    transition: all 0.3s ease;
-  }
-  
-  .emotion-label.selected {
-    font-weight: 700;
-    fill: #FF6B00;
-  }
-  
-  .emotion-label.small {
-    font-size: 9px;
-  }
-  
-  .emotion-label.tiny {
-    font-size: 7px;
   }
   
   .selection-indicator {
